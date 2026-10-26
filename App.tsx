@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, View, SafeAreaView, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from './src/theme/colors';
@@ -9,6 +9,7 @@ import { DeviceStatusScreen } from './src/screens/DeviceStatusScreen';
 import { DeviceAddressModal } from './src/components/DeviceAddressModal';
 import { TemperatureSettings, DEFAULT_TEMPERATURE_SETTINGS } from './src/types/incubator';
 import { deviceConfig } from './src/services/deviceConfig';
+import { esp8266Api } from './src/services/esp8266Api';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('dashboard');
@@ -16,6 +17,36 @@ export default function App() {
   const [temperatureSettings, setTemperatureSettings] = useState<TemperatureSettings>(
     DEFAULT_TEMPERATURE_SETTINGS
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadDeviceConfig = async () => {
+      try {
+        const result = await esp8266Api.getConfig();
+        if (isMounted && result.success) {
+          setTemperatureSettings({
+            bulbOnThreshold: result.data.bulbOnThreshold,
+            bulbOffThreshold: result.data.bulbOffThreshold,
+            lastUpdated: `Synced with ESP8266 (${result.timestamp})`,
+          });
+        }
+      } catch {
+        // Retain current settings if ESP8266 is temporarily unreachable
+      }
+    };
+
+    loadDeviceConfig();
+
+    const unsubscribe = deviceConfig.subscribe(() => {
+      loadDeviceConfig();
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, []);
 
   const handleSaveSettings = (updated: TemperatureSettings) => {
     setTemperatureSettings(updated);

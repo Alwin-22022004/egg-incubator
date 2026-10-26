@@ -4,7 +4,7 @@
  * to user configuration changes.
  */
 
-export const DEFAULT_DEVICE_URL = 'http://192.168.1.142';
+export const DEFAULT_DEVICE_URL = 'http://192.168.1.43';
 
 export interface DeviceConfigState {
   baseUrl: string;

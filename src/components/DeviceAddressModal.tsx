@@ -123,7 +123,7 @@ export const DeviceAddressModal: React.FC<DeviceAddressModalProps> = ({
                   if (inputError) setInputError(null);
                   if (testStatus.message) setTestStatus({ testing: false });
                 }}
-                placeholder="http://192.168.1.142"
+                placeholder="http://192.168.1.43"
                 placeholderTextColor={colors.textMuted}
                 autoCapitalize="none"
                 autoCorrect={false}
