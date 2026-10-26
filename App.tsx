@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View, SafeAreaView, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from './src/theme/colors';
@@ -7,53 +7,29 @@ import { DashboardScreen } from './src/screens/DashboardScreen';
 import { TemperatureSettingsScreen } from './src/screens/TemperatureSettingsScreen';
 import { DeviceStatusScreen } from './src/screens/DeviceStatusScreen';
 import { DeviceAddressModal } from './src/components/DeviceAddressModal';
-import { TemperatureSettings } from './src/types/incubator';
-import { DataMode } from './src/types/api';
-import { DEFAULT_TEMPERATURE_SETTINGS } from './src/mock/mockData';
+import { TemperatureSettings, DEFAULT_TEMPERATURE_SETTINGS } from './src/types/incubator';
 import { deviceConfig } from './src/services/deviceConfig';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('dashboard');
-  const [dataMode, setDataMode] = useState<DataMode>(deviceConfig.getDataMode());
   const [isConfigModalVisible, setIsConfigModalVisible] = useState(false);
-
-  // Keep Mock Mode settings and Device Mode settings separate
-  const [mockTemperatureSettings, setMockTemperatureSettings] = useState<TemperatureSettings>(
+  const [temperatureSettings, setTemperatureSettings] = useState<TemperatureSettings>(
     DEFAULT_TEMPERATURE_SETTINGS
   );
-  const [deviceTemperatureSettings, setDeviceTemperatureSettings] = useState<TemperatureSettings>({
-    ...DEFAULT_TEMPERATURE_SETTINGS,
-    lastUpdated: 'Default (Pending /api/config sync)',
-    isMock: false,
-  });
-
-  // Subscribe to device config service changes (URL and mode)
-  useEffect(() => {
-    const unsubscribe = deviceConfig.subscribe((state) => {
-      setDataMode(state.dataMode);
-    });
-    return unsubscribe;
-  }, []);
-
-  const activeSettings = dataMode === 'device' ? deviceTemperatureSettings : mockTemperatureSettings;
 
   const handleSaveSettings = (updated: TemperatureSettings) => {
-    if (dataMode === 'device') {
-      setDeviceTemperatureSettings(updated);
-    } else {
-      setMockTemperatureSettings(updated);
-    }
+    setTemperatureSettings(updated);
   };
 
   const getSubheaderTitle = () => {
     switch (currentScreen) {
       case 'temperatureSettings':
-        return dataMode === 'device' ? 'ESP8266 Config (/api/config)' : 'Mock Threshold Config';
+        return 'ESP8266 Config (/api/config)';
       case 'deviceStatus':
-        return dataMode === 'device' ? 'Live API Diagnostics' : 'ESP8266 Diagnostics (Mock)';
+        return 'Live API Diagnostics';
       case 'dashboard':
       default:
-        return dataMode === 'device' ? 'Live HTTP Telemetry' : 'Simulated Telemetry';
+        return `Target: ${deviceConfig.getBaseUrl()}`;
     }
   };
 
@@ -65,7 +41,6 @@ export default function App() {
           connection="connected"
           chipModel="ESP8266 NodeMCU"
           lastSync={getSubheaderTitle()}
-          dataMode={dataMode}
           currentScreen={currentScreen}
           onNavigate={(screen) => setCurrentScreen(screen)}
           onOpenSettings={() => setCurrentScreen('temperatureSettings')}
@@ -76,8 +51,7 @@ export default function App() {
 
         {currentScreen === 'dashboard' && (
           <DashboardScreen
-            settings={activeSettings}
-            dataMode={dataMode}
+            settings={temperatureSettings}
             onOpenSettings={() => setCurrentScreen('temperatureSettings')}
             onOpenDiagnostics={() => setCurrentScreen('deviceStatus')}
             onOpenConfigModal={() => setIsConfigModalVisible(true)}
@@ -86,8 +60,7 @@ export default function App() {
 
         {currentScreen === 'temperatureSettings' && (
           <TemperatureSettingsScreen
-            currentSettings={activeSettings}
-            dataMode={dataMode}
+            currentSettings={temperatureSettings}
             onSaveSettings={handleSaveSettings}
             onClose={() => setCurrentScreen('dashboard')}
           />
@@ -95,14 +68,13 @@ export default function App() {
 
         {currentScreen === 'deviceStatus' && (
           <DeviceStatusScreen
-            dataMode={dataMode}
             onBackToDashboard={() => setCurrentScreen('dashboard')}
             onOpenSettings={() => setCurrentScreen('temperatureSettings')}
             onOpenConfigModal={() => setIsConfigModalVisible(true)}
           />
         )}
 
-        {/* Global Modal to configure device base URL and operational data mode */}
+        {/* Global Modal to configure device base URL */}
         <DeviceAddressModal
           visible={isConfigModalVisible}
           onClose={() => setIsConfigModalVisible(false)}

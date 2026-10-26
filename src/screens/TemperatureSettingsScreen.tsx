@@ -12,22 +12,18 @@ import {
   Platform,
 } from 'react-native';
 import { colors } from '../theme/colors';
-import { TemperatureSettings } from '../types/incubator';
-import { DEFAULT_TEMPERATURE_SETTINGS } from '../mock/mockData';
-import { DataMode } from '../types/api';
+import { TemperatureSettings, DEFAULT_TEMPERATURE_SETTINGS } from '../types/incubator';
 import { esp8266Api } from '../services/esp8266Api';
 import { deviceConfig } from '../services/deviceConfig';
 
 interface TemperatureSettingsScreenProps {
   currentSettings: TemperatureSettings;
-  dataMode: DataMode;
   onSaveSettings: (settings: TemperatureSettings) => void;
   onClose: () => void;
 }
 
 export const TemperatureSettingsScreen: React.FC<TemperatureSettingsScreenProps> = ({
   currentSettings,
-  dataMode,
   onSaveSettings,
   onClose,
 }) => {
@@ -49,45 +45,40 @@ export const TemperatureSettingsScreen: React.FC<TemperatureSettingsScreenProps>
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
 
-  // When Device Mode is active, fetch live configuration via GET /api/config on mount
+  // Fetch live configuration from ESP8266 via GET /api/config on mount
   useEffect(() => {
     let isMounted = true;
+    setIsLoadingConfig(true);
+    setDeviceNotice('Fetching current configuration from ESP8266 (/api/config)...');
 
-    if (dataMode === 'device') {
-      setIsLoadingConfig(true);
-      setDeviceNotice('Fetching current configuration from ESP8266 (/api/config)...');
-
-      esp8266Api
-        .getConfig()
-        .then((result) => {
-          if (!isMounted) return;
+    esp8266Api
+      .getConfig()
+      .then((result) => {
+        if (!isMounted) return;
+        setIsLoadingConfig(false);
+        if (result.success) {
+          setOnInput(result.data.bulbOnThreshold.toString());
+          setOffInput(result.data.bulbOffThreshold.toString());
+          setDeviceNotice(
+            `Live thresholds loaded from ${deviceConfig.getBaseUrl()}: ON ${result.data.bulbOnThreshold}°C / OFF ${result.data.bulbOffThreshold}°C`
+          );
+        } else {
+          setDeviceNotice(
+            `Device unreachable at ${deviceConfig.getBaseUrl()}. Showing current cached thresholds.`
+          );
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
           setIsLoadingConfig(false);
-          if (result.success) {
-            setOnInput(result.data.bulbOnThreshold.toString());
-            setOffInput(result.data.bulbOffThreshold.toString());
-            setDeviceNotice(
-              `Live config loaded from ${deviceConfig.getBaseUrl()}: ON ${result.data.bulbOnThreshold}°C / OFF ${result.data.bulbOffThreshold}°C`
-            );
-          } else {
-            setDeviceNotice(
-              `Device unreachable at ${deviceConfig.getBaseUrl()}. Displaying local fallback thresholds.`
-            );
-          }
-        })
-        .catch(() => {
-          if (isMounted) {
-            setIsLoadingConfig(false);
-            setDeviceNotice('Failed to communicate with device. Showing local fallback.');
-          }
-        });
-    } else {
-      setDeviceNotice(null);
-    }
+          setDeviceNotice('Failed to communicate with device. Showing current cached thresholds.');
+        }
+      });
 
     return () => {
       isMounted = false;
     };
-  }, [dataMode]);
+  }, []);
 
   const validate = (): { onNum: number; offNum: number } | null => {
     setOnErrorMessage(null);
@@ -163,59 +154,43 @@ export const TemperatureSettingsScreen: React.FC<TemperatureSettingsScreenProps>
     const now = new Date();
     const timestamp = now.toLocaleTimeString();
 
-    if (dataMode === 'device') {
-      // POST /api/config to ESP8266
-      try {
-        const response = await esp8266Api.postConfig({
-          bulbOnThreshold: validResult.onNum,
-          bulbOffThreshold: validResult.offNum,
-        });
+    // POST /api/config to ESP8266
+    try {
+      const response = await esp8266Api.postConfig({
+        bulbOnThreshold: validResult.onNum,
+        bulbOffThreshold: validResult.offNum,
+      });
 
-        setIsSaving(false);
+      setIsSaving(false);
 
-        if (response.success) {
-          const updated: TemperatureSettings = {
-            bulbOnThreshold: response.data.bulbOnThreshold,
-            bulbOffThreshold: response.data.bulbOffThreshold,
-            lastUpdated: `Saved to ESP8266 at ${timestamp}`,
-            isMock: false,
-          };
-          onSaveSettings(updated);
-          setSuccessMessage(
-            `Successfully updated ESP8266 thresholds via POST /api/config! (${response.data.bulbOnThreshold}°C / ${response.data.bulbOffThreshold}°C)`
-          );
-        } else {
-          // Keep user's unsaved values intact when saving fails!
-          setGeneralErrorMessage(
-            `Failed to save to ESP8266: ${response.error}\nYour entered values have been retained. Try again or check local Wi-Fi link.`
-          );
-        }
-      } catch (err: unknown) {
-        setIsSaving(false);
-        setGeneralErrorMessage(
-          `Unexpected network error: ${err instanceof Error ? err.message : 'Unknown'}. Entered values are preserved.`
-        );
-      }
-    } else {
-      // Mock Mode: simulate local save with delay
-      setTimeout(() => {
+      if (response.success) {
         const updated: TemperatureSettings = {
-          bulbOnThreshold: validResult.onNum,
-          bulbOffThreshold: validResult.offNum,
-          lastUpdated: `Saved locally at ${timestamp} (Mock Mode)`,
-          isMock: true,
+          bulbOnThreshold: response.data.bulbOnThreshold,
+          bulbOffThreshold: response.data.bulbOffThreshold,
+          lastUpdated: `Saved to ESP8266 at ${timestamp}`,
         };
         onSaveSettings(updated);
-        setIsSaving(false);
-        setSuccessMessage('Settings saved successfully (Local Mock Mode)!');
-      }, 400);
+        setSuccessMessage(
+          `Successfully updated ESP8266 thresholds via POST /api/config! (${response.data.bulbOnThreshold}°C / ${response.data.bulbOffThreshold}°C)`
+        );
+      } else {
+        // Keep user's entered values intact when saving fails
+        setGeneralErrorMessage(
+          `Failed to save to ESP8266: ${response.error}\nYour entered values have been retained. Ensure your phone and the ESP8266 are on the same Wi-Fi.`
+        );
+      }
+    } catch (err: unknown) {
+      setIsSaving(false);
+      setGeneralErrorMessage(
+        `Network error: ${err instanceof Error ? err.message : 'Unknown'}. Entered values are preserved.`
+      );
     }
   };
 
   const handleResetToDefaults = () => {
     Alert.alert(
       'Reset Thresholds to Defaults?',
-      'This will restore the factory recommended values:\n• Bulb ON: 36.0°C\n• Bulb OFF: 38.0°C',
+      'This will restore factory recommended values:\n• Bulb ON: 36.0°C\n• Bulb OFF: 38.0°C',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -227,7 +202,7 @@ export const TemperatureSettingsScreen: React.FC<TemperatureSettingsScreenProps>
             setOnErrorMessage(null);
             setOffErrorMessage(null);
             setGeneralErrorMessage(null);
-            setSuccessMessage('Defaults restored in form. Tap "Save Settings" to apply.');
+            setSuccessMessage('Defaults restored in form. Tap "Save to ESP8266" to upload.');
           },
         },
       ]
@@ -261,29 +236,13 @@ export const TemperatureSettingsScreen: React.FC<TemperatureSettingsScreenProps>
           <Text style={styles.navTitle}>Temperature Settings</Text>
         </View>
 
-        {/* Mode Indicator Banner */}
-        <View
-          style={[
-            styles.modeBanner,
-            dataMode === 'device' ? styles.modeBannerDevice : styles.modeBannerMock,
-          ]}
-        >
-          <Text style={styles.modeBannerIcon}>{dataMode === 'device' ? '📡' : '🧪'}</Text>
-          <View style={styles.modeBannerTextContainer}>
-            <Text
-              style={[
-                styles.modeBannerTitle,
-                { color: dataMode === 'device' ? colors.cyanGlow : colors.amberGlow },
-              ]}
-            >
-              {dataMode === 'device'
-                ? `DEVICE MODE TARGET: ${deviceConfig.getBaseUrl()}`
-                : 'MOCK SIMULATION MODE'}
-            </Text>
-            <Text style={styles.modeBannerSubtitle}>
-              {dataMode === 'device'
-                ? 'Saving will send HTTP POST /api/config directly to your ESP8266 NodeMCU. The firmware autonomously makes all relay actuation decisions.'
-                : 'Changes update local mock state for previewing. No hardware packets will be transmitted.'}
+        {/* Target Device Banner */}
+        <View style={styles.targetDeviceBanner}>
+          <Text style={styles.targetDeviceIcon}>📡</Text>
+          <View style={styles.targetDeviceTextWrap}>
+            <Text style={styles.targetDeviceTitle}>ESP8266 Target: {deviceConfig.getBaseUrl()}</Text>
+            <Text style={styles.targetDeviceSubtitle}>
+              Threshold updates are persisted to ESP8266 EEPROM. Heating is autonomously regulated on hardware.
             </Text>
           </View>
         </View>
@@ -490,9 +449,7 @@ export const TemperatureSettingsScreen: React.FC<TemperatureSettingsScreenProps>
             {isSaving ? (
               <ActivityIndicator size="small" color={colors.textInverse} />
             ) : (
-              <Text style={styles.saveButtonText}>
-                {dataMode === 'device' ? 'Save to ESP8266 (POST /api/config)' : 'Save Settings (Mock)'}
-              </Text>
+              <Text style={styles.saveButtonText}>Save to ESP8266 (POST /api/config)</Text>
             )}
           </TouchableOpacity>
 
@@ -517,8 +474,7 @@ export const TemperatureSettingsScreen: React.FC<TemperatureSettingsScreenProps>
 
         <View style={styles.statusFooter}>
           <Text style={styles.statusFooterText}>
-            Current configuration: {currentSettings.lastUpdated || 'Factory Defaults'} • Mode:{' '}
-            {dataMode.toUpperCase()}
+            Current configuration: {currentSettings.lastUpdated || 'Factory Defaults'}
           </Text>
         </View>
       </ScrollView>
@@ -564,7 +520,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
   },
-  modeBanner: {
+  targetDeviceBanner: {
     flexDirection: 'row',
     borderWidth: 1,
     borderRadius: 12,
@@ -572,56 +528,53 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     gap: 10,
     alignItems: 'flex-start',
-  },
-  modeBannerMock: {
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-  },
-  modeBannerDevice: {
-    backgroundColor: 'rgba(6, 182, 212, 0.1)',
+    backgroundColor: 'rgba(6, 182, 212, 0.08)',
     borderColor: 'rgba(6, 182, 212, 0.3)',
   },
-  modeBannerIcon: {
+  targetDeviceIcon: {
     fontSize: 18,
+    marginTop: 1,
   },
-  modeBannerTextContainer: {
+  targetDeviceTextWrap: {
     flex: 1,
   },
-  modeBannerTitle: {
+  targetDeviceTitle: {
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.5,
+    color: colors.cyanGlow,
   },
-  modeBannerSubtitle: {
+  targetDeviceSubtitle: {
     fontSize: 11,
     color: colors.textSecondary,
     marginTop: 2,
-    lineHeight: 16,
+    lineHeight: 15,
   },
   loadingConfigBox: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
     backgroundColor: colors.surfaceSubtle,
     padding: 10,
     borderRadius: 10,
-    gap: 8,
     marginBottom: 12,
   },
   loadingConfigText: {
-    fontSize: 11,
+    fontSize: 12,
     color: colors.cyanGlow,
+    fontWeight: '600',
   },
   deviceNoticeBox: {
     backgroundColor: colors.surfaceSubtle,
     padding: 10,
     borderRadius: 10,
+    marginBottom: 12,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: 14,
   },
   deviceNoticeText: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: colors.textSecondary,
   },
   successBanner: {
     flexDirection: 'row',
@@ -631,19 +584,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     padding: 12,
-    marginBottom: 14,
     gap: 10,
+    marginBottom: 14,
   },
   successIcon: {
     fontSize: 16,
-    fontWeight: '800',
     color: colors.emeraldGlow,
+    fontWeight: '700',
   },
   successText: {
     flex: 1,
     fontSize: 12,
-    color: '#A7F3D0',
     fontWeight: '600',
+    color: '#A7F3D0',
     lineHeight: 16,
   },
   errorBanner: {
@@ -654,8 +607,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     padding: 12,
-    marginBottom: 14,
     gap: 10,
+    marginBottom: 14,
   },
   errorIcon: {
     fontSize: 16,
@@ -663,14 +616,14 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     fontSize: 12,
-    color: '#FECACA',
     fontWeight: '600',
+    color: '#FECACA',
     lineHeight: 16,
   },
   card: {
     backgroundColor: colors.surface,
     borderRadius: 18,
-    padding: 16,
+    padding: 18,
     borderWidth: 1,
     borderColor: colors.border,
     marginBottom: 16,
@@ -686,6 +639,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginBottom: 16,
+    lineHeight: 16,
   },
   inputGroup: {
     marginBottom: 16,
@@ -702,9 +656,12 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   defaultBadge: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.textMuted,
-    fontWeight: '500',
+    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   fieldHint: {
     fontSize: 11,
@@ -720,7 +677,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.border,
     paddingHorizontal: 12,
-    height: 48,
+    height: 52,
   },
   inputWrapperFocused: {
     borderColor: colors.amberGlow,
@@ -730,31 +687,34 @@ const styles = StyleSheet.create({
     borderColor: colors.crimsonGlow,
   },
   inputPrefixIcon: {
-    fontSize: 16,
-    marginRight: 8,
+    fontSize: 18,
+    marginRight: 10,
   },
   textInput: {
     flex: 1,
     fontSize: 18,
     fontWeight: '700',
     color: colors.textPrimary,
+    fontFamily: 'monospace',
     paddingVertical: 0,
   },
   unitBadge: {
-    backgroundColor: 'rgba(245, 158, 11, 0.15)',
+    backgroundColor: colors.surfaceElevated,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    borderRadius: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   unitText: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.amberGlow,
+    color: colors.textSecondary,
   },
   inlineErrorText: {
     fontSize: 11,
     color: colors.crimsonGlow,
-    marginTop: 5,
+    marginTop: 4,
     fontWeight: '600',
   },
   explanationCard: {
@@ -763,7 +723,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    marginBottom: 18,
+    marginBottom: 20,
   },
   explanationHeader: {
     flexDirection: 'row',
@@ -782,20 +742,19 @@ const styles = StyleSheet.create({
   },
   explanationLead: {
     fontSize: 12,
-    color: colors.textSecondary,
-    lineHeight: 17,
+    color: colors.textMuted,
+    lineHeight: 16,
     marginBottom: 14,
   },
   hysteresisTrackContainer: {
-    marginBottom: 14,
+    marginBottom: 16,
   },
   hysteresisTrack: {
     flexDirection: 'row',
-    height: 32,
+    height: 28,
     borderRadius: 8,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: colors.border,
+    marginBottom: 6,
   },
   hysteresisZone: {
     flex: 1,
@@ -812,14 +771,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(6, 182, 212, 0.25)',
   },
   zoneText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: colors.textSecondary,
   },
   hysteresisMarkers: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 6,
   },
   markerText: {
     fontSize: 10,
@@ -828,13 +786,9 @@ const styles = StyleSheet.create({
   },
   rulesList: {
     gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: 12,
   },
   ruleItem: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
     gap: 6,
   },
   ruleBullet: {
@@ -846,23 +800,23 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 12,
     color: colors.textSecondary,
-    lineHeight: 17,
+    lineHeight: 16,
   },
   ruleHighlight: {
-    color: colors.textPrimary,
     fontWeight: '700',
+    color: colors.textPrimary,
   },
   actionContainer: {
-    gap: 10,
+    gap: 12,
     marginBottom: 16,
   },
   saveButton: {
     backgroundColor: colors.amberGlow,
-    height: 48,
+    height: 50,
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 2,
+    elevation: 3,
   },
   saveButtonDisabled: {
     opacity: 0.6,
@@ -874,8 +828,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   cancelButton: {
-    backgroundColor: colors.surface,
-    height: 44,
+    backgroundColor: colors.surfaceElevated,
+    height: 46,
     borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
@@ -888,18 +842,17 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   resetButton: {
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: 'center',
   },
   resetButtonText: {
     fontSize: 12,
-    fontWeight: '600',
     color: colors.textMuted,
     textDecorationLine: 'underline',
   },
   statusFooter: {
     alignItems: 'center',
-    marginTop: 4,
+    paddingVertical: 8,
   },
   statusFooterText: {
     fontSize: 11,

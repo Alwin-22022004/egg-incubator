@@ -15,24 +15,16 @@ import { MetricCard } from '../components/MetricCard';
 import { ActuatorStatusCard } from '../components/ActuatorStatusCard';
 import { IncubationProgressCard } from '../components/IncubationProgressCard';
 import {
-  StateSimulationSelector,
-  SimulatedScenario,
-} from '../components/StateSimulationSelector';
-import {
-  mockNormalState,
-  mockWarningState,
-  mockLoadingState,
-  mockDisconnectedState,
-  mockErrorState,
-} from '../mock/mockData';
-import { IncubatorState, TemperatureSettings, ConnectionState } from '../types/incubator';
-import { DataMode, DeviceStatusResponse } from '../types/api';
+  TemperatureSettings,
+  ConnectionState,
+  DEFAULT_INCUBATION_PROGRESS,
+} from '../types/incubator';
+import { DeviceStatusResponse } from '../types/api';
 import { esp8266Api } from '../services/esp8266Api';
 import { deviceConfig } from '../services/deviceConfig';
 
 interface DashboardScreenProps {
   settings: TemperatureSettings;
-  dataMode: DataMode;
   onOpenSettings: () => void;
   onOpenDiagnostics?: () => void;
   onOpenConfigModal?: () => void;
@@ -40,21 +32,16 @@ interface DashboardScreenProps {
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   settings,
-  dataMode,
   onOpenSettings,
   onOpenDiagnostics,
   onOpenConfigModal,
 }) => {
-  // Mock Mode state
-  const [scenario, setScenario] = useState<SimulatedScenario>('normal');
-  const [refreshing, setRefreshing] = useState(false);
-
-  // Device Mode state
   const [deviceData, setDeviceData] = useState<DeviceStatusResponse | null>(null);
   const [deviceConnState, setDeviceConnState] = useState<ConnectionState>('connecting');
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [lastSuccessTime, setLastSuccessTime] = useState<Date | null>(null);
   const [readingAgeSeconds, setReadingAgeSeconds] = useState<number>(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   const pollingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const ageTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -88,7 +75,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
     isPollingRef.current = true;
     try {
-      // Show connecting state only if we have not had a successful packet yet
       if ((!hasHadSuccessRef.current && !deviceDataRef.current) || (isManualRefresh && !hasHadSuccessRef.current)) {
         setDeviceConnState('connecting');
       }
@@ -96,7 +82,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       const result = await esp8266Api.getStatus();
       if (!isComponentActiveRef.current) return;
 
-      // Ignore intentionally cancelled requests (e.g. unmount or background navigation)
       if (!result.success && result.error === 'Request was cancelled.') {
         return;
       }
@@ -119,7 +104,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         setLastSuccessTime((prev) => (prev ? prev : now));
         setReadingAgeSeconds((prev) => (prev === 0 ? prev : 0));
       } else {
-        // Genuine error or disconnect - preserve existing readings so screen doesn't clear
         setDeviceConnState((prev) => {
           const nextState: ConnectionState = hasHadSuccessRef.current ? 'disconnected' : 'error';
           return prev === nextState ? prev : nextState;
@@ -147,7 +131,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     // Fire immediate poll
     pollDeviceStatus();
 
-    // 2-second background live telemetry poll
+    // 2-second live telemetry poll
     pollingTimerRef.current = setInterval(() => {
       pollDeviceStatus();
     }, 2000);
@@ -157,7 +141,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       if (lastSuccessTimeRef.current) {
         const age = Math.floor((Date.now() - lastSuccessTimeRef.current.getTime()) / 1000);
         setReadingAgeSeconds((prev) => {
-          // Both 0, 1, 2 format to "Just now (live)" - avoid re-renders when displayed string is unchanged
           if (prev <= 2 && age <= 2) return prev;
           return prev === age ? prev : age;
         });
@@ -165,119 +148,71 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     }, 1000);
   };
 
-  // Device Mode polling lifecycle
+  // Polling lifecycle
   useEffect(() => {
     isComponentActiveRef.current = true;
+    startPolling();
 
-    if (dataMode === 'device') {
-      startPolling();
-
-      // AppState listener: stop polling when app is in background, resume when active
-      const appStateSub = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-        if (nextAppState !== 'active') {
-          stopPolling();
-          esp8266Api.cancelPendingRequests();
-        } else if (dataMode === 'device') {
-          startPolling();
-        }
-      });
-
-      // Subscribe to device config service changes (e.g. if user updates IP in modal)
-      const configSub = deviceConfig.subscribe((configState) => {
-        if (configState.baseUrl !== currentBaseUrlRef.current) {
-          currentBaseUrlRef.current = configState.baseUrl;
-          hasHadSuccessRef.current = false;
-          deviceDataRef.current = null;
-          lastSuccessTimeRef.current = null;
-          setDeviceData(null);
-          setLastSuccessTime(null);
-          setDeviceConnState('connecting');
-          startPolling();
-        }
-      });
-
-      return () => {
-        isComponentActiveRef.current = false;
+    // AppState listener: stop polling when app is in background, resume when active
+    const appStateSub = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+      if (nextAppState !== 'active') {
         stopPolling();
-        appStateSub.remove();
-        configSub();
         esp8266Api.cancelPendingRequests();
-      };
-    } else {
-      // In Mock Mode, clear device timers
-      stopPolling();
-      esp8266Api.cancelPendingRequests();
-    }
+      } else {
+        startPolling();
+      }
+    });
+
+    // Subscribe to device config changes (e.g. if user updates IP in modal)
+    const configSub = deviceConfig.subscribe((configState) => {
+      if (configState.baseUrl !== currentBaseUrlRef.current) {
+        currentBaseUrlRef.current = configState.baseUrl;
+        hasHadSuccessRef.current = false;
+        deviceDataRef.current = null;
+        lastSuccessTimeRef.current = null;
+        setDeviceData(null);
+        setLastSuccessTime(null);
+        setDeviceConnState('connecting');
+        startPolling();
+      }
+    });
 
     return () => {
       isComponentActiveRef.current = false;
       stopPolling();
+      appStateSub.remove();
+      configSub();
+      esp8266Api.cancelPendingRequests();
     };
-  }, [dataMode]);
+  }, []);
 
-  const getStateForScenario = (s: SimulatedScenario): IncubatorState => {
-    switch (s) {
-      case 'overheat':
-        return mockWarningState;
-      case 'loading':
-        return mockLoadingState;
-      case 'disconnected':
-        return mockDisconnectedState;
-      case 'sensor_error':
-        return mockErrorState;
-      case 'normal':
-      default:
-        return mockNormalState;
-    }
-  };
-
-  // Determine active state depending on whether Mock Mode or Device Mode is active
-  const mockState = getStateForScenario(scenario);
-
-  const activeConnection: ConnectionState =
-    dataMode === 'device' ? deviceConnState : mockState.connection;
+  const activeConnection: ConnectionState = deviceConnState;
 
   const activeError =
-    dataMode === 'device'
-      ? deviceError ||
-        (deviceData?.sensorStatus === 'SENSOR_ERROR'
-          ? 'DHT11 Sensor Error: Sensor disconnected or pulling low on GPIO pin D5. Bulb is in fail-safe OFF mode.'
-          : undefined)
-      : mockState.errorMessage;
+    deviceError ||
+    (deviceData?.sensorStatus === 'SENSOR_ERROR'
+      ? 'DHT11 Sensor Error: Sensor disconnected or pulling low on GPIO pin D5. Heating bulb is in fail-safe OFF mode.'
+      : undefined);
 
-  // Temperature and Humidity values (never converting missing values into fake 0s)
-  const currentTemp =
-    dataMode === 'device'
-      ? deviceData?.temperature ?? null
-      : mockState.telemetry.temperature;
+  // Live sensor readings
+  const currentTemp = deviceData?.temperature ?? null;
+  const currentHumidity = deviceData?.humidity ?? null;
 
-  const currentHumidity =
-    dataMode === 'device'
-      ? deviceData?.humidity ?? null
-      : mockState.telemetry.humidity;
+  const currentActuators = {
+    bulbRelay: deviceData?.bulbOn ?? false,
+    fanRelay: deviceData?.fanOn ?? null,
+    buzzerActive: deviceData?.buzzerOn ?? false,
+    oledDisplayActive: activeConnection === 'connected',
+  };
 
-  const currentActuators =
-    dataMode === 'device'
-      ? {
-          bulbRelay: deviceData?.bulbOn ?? false,
-          fanRelay: deviceData?.fanOn ?? null,
-          buzzerActive: deviceData?.buzzerOn ?? false,
-          oledDisplayActive: activeConnection === 'connected',
-        }
-      : mockState.actuators;
-
-  // Dynamic values driven by user-configured thresholds
+  // Dynamic values driven by configured thresholds
   const targetTemp = (settings.bulbOnThreshold + settings.bulbOffThreshold) / 2;
   const toleranceTemp = (settings.bulbOffThreshold - settings.bulbOnThreshold) / 2;
   const deadbandSpan = settings.bulbOffThreshold - settings.bulbOnThreshold;
 
   const onRefresh = async () => {
     setRefreshing(true);
-    if (dataMode === 'device') {
-      await pollDeviceStatus(true);
-    } else {
-      await new Promise((resolve) => setTimeout(resolve, 600));
-    }
+    await pollDeviceStatus(true);
     setRefreshing(false);
   };
 
@@ -286,13 +221,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     if (seconds < 60) return `${seconds}s ago`;
     const mins = Math.floor(seconds / 60);
     return `${mins}m ${seconds % 60}s ago (stale)`;
-  };
-
-  const formatUptime = (seconds: number) => {
-    if (seconds <= 0) return '0h 0m';
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    return `${hrs}h ${mins}m`;
   };
 
   return (
@@ -309,32 +237,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         />
       }
     >
-      {/* Mode Banner & IP Information */}
-      <View
-        style={[
-          styles.modeIndicatorCard,
-          dataMode === 'device' ? styles.modeDeviceCard : styles.modeMockCard,
-        ]}
-      >
-        <View style={styles.modeTextGroup}>
-          <Text style={styles.modeIndicatorIcon}>
-            {dataMode === 'device' ? '📡' : '🧪'}
-          </Text>
-          <View>
-            <Text
-              style={[
-                styles.modeIndicatorTitle,
-                { color: dataMode === 'device' ? colors.cyanGlow : colors.amberGlow },
-              ]}
-            >
-              {dataMode === 'device' ? 'LIVE DEVICE MODE' : 'MOCK SIMULATION MODE'}
-            </Text>
-            <Text style={styles.modeIndicatorSub}>
-              {dataMode === 'device'
-                ? `Polling ${deviceConfig.getBaseUrl()}/api/status • ${
-                    lastSuccessTime ? formatAge(readingAgeSeconds) : 'Connecting...'
-                  }`
-                : 'Using simulated telemetry scenarios for local testing'}
+      {/* Device Connection Info Card */}
+      <View style={styles.deviceConnectionCard}>
+        <View style={styles.deviceInfoGroup}>
+          <Text style={styles.deviceIcon}>📡</Text>
+          <View style={styles.deviceTextWrap}>
+            <Text style={styles.deviceTitle}>ESP8266 NodeMCU</Text>
+            <Text style={styles.deviceSub}>
+              {deviceConfig.getBaseUrl()} • {lastSuccessTime ? formatAge(readingAgeSeconds) : 'Connecting...'}
             </Text>
           </View>
         </View>
@@ -345,9 +255,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             onPress={onOpenConfigModal}
             activeOpacity={0.7}
           >
-            <Text style={styles.configChangeButtonText}>
-              {dataMode === 'device' ? 'Edit IP ✏️' : 'Switch Mode'}
-            </Text>
+            <Text style={styles.configChangeButtonText}>Edit IP ✏️</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -356,13 +264,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <ConnectionBanner
         connection={activeConnection}
         health={
-          dataMode === 'device'
-            ? deviceConnState === 'connected'
-              ? deviceData?.sensorStatus === 'OK'
-                ? 'optimal'
-                : 'critical'
-              : 'offline'
-            : mockState.health
+          deviceConnState === 'connected'
+            ? deviceData?.sensorStatus === 'OK'
+              ? 'optimal'
+              : 'critical'
+            : 'offline'
         }
         errorMessage={activeError ?? undefined}
       />
@@ -375,7 +281,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <View>
               <Text style={styles.thresholdsTitle}>CONFIGURED BULB THRESHOLDS</Text>
               <Text style={styles.thresholdsSubtitle}>
-                {settings.lastUpdated || 'Factory Defaults'} {settings.isMock ? '(Local)' : '(Device)'}
+                {settings.lastUpdated || 'Factory Defaults'}
               </Text>
             </View>
           </View>
@@ -415,11 +321,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       {/* Main Sensor Metrics (DHT11) */}
       <View style={styles.sectionHeaderRow}>
         <Text style={styles.sectionHeading}>DHT11 SENSOR TELEMETRY</Text>
-        <Text style={styles.sectionSub}>
-          {dataMode === 'device'
-            ? `Live readings from ${deviceConfig.getBaseUrl()}`
-            : 'Simulated Chamber Readings'}
-        </Text>
+        <Text style={styles.sectionSub}>Live readings from {deviceConfig.getBaseUrl()}/api/status</Text>
       </View>
 
       <MetricCard
@@ -440,10 +342,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         icon="💧"
         value={currentHumidity}
         unit="%"
-        target={mockState.telemetry.targetHumidity}
-        tolerance={mockState.telemetry.humidityTolerance}
-        minSafe={mockState.telemetry.targetHumidity - mockState.telemetry.humidityTolerance}
-        maxSafe={mockState.telemetry.targetHumidity + mockState.telemetry.humidityTolerance}
+        target={55.0}
+        tolerance={5.0}
+        minSafe={50.0}
+        maxSafe={65.0}
         connection={activeConnection}
         accentColor={colors.cyanGlow}
       />
@@ -455,21 +357,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       />
 
       {/* Incubation Progress Tracker */}
-      <IncubationProgressCard progress={mockState.progress} />
+      <IncubationProgressCard progress={DEFAULT_INCUBATION_PROGRESS} />
 
-      {/* Device Info & Network Diagnostics Card */}
+      {/* Diagnostics Quick Card */}
       <View style={styles.deviceCard}>
         <View style={styles.deviceHeader}>
-          <Text style={styles.deviceIcon}>📡</Text>
-          <Text style={styles.deviceTitle}>ESP8266 SYSTEM DIAGNOSTICS</Text>
+          <Text style={styles.deviceCardIcon}>📡</Text>
+          <Text style={styles.deviceCardTitle}>ESP8266 SYSTEM DIAGNOSTICS</Text>
         </View>
 
         <View style={styles.diagnosticGrid}>
           <View style={styles.diagnosticItem}>
             <Text style={styles.diagnosticLabel}>Target Device</Text>
-            <Text style={styles.diagnosticValue}>
-              {dataMode === 'device' ? deviceConfig.getBaseUrl() : mockState.device.wifiSsid}
-            </Text>
+            <Text style={styles.diagnosticValue}>{deviceConfig.getBaseUrl()}</Text>
           </View>
           <View style={styles.diagnosticItem}>
             <Text style={styles.diagnosticLabel}>Connection Status</Text>
@@ -485,27 +385,30 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <View style={styles.diagnosticItem}>
             <Text style={styles.diagnosticLabel}>Last Status Packet</Text>
             <Text style={styles.diagnosticValue}>
-              {dataMode === 'device'
-                ? lastSuccessTime
-                  ? formatAge(readingAgeSeconds)
-                  : 'Awaiting Response'
-                : mockState.device.lastSyncTimestamp}
+              {lastSuccessTime ? formatAge(readingAgeSeconds) : 'Awaiting Response'}
             </Text>
           </View>
           <View style={styles.diagnosticItem}>
-            <Text style={styles.diagnosticLabel}>System Uptime</Text>
-            <Text style={styles.diagnosticValue}>
-              {dataMode === 'device' ? 'Not in /api/status' : formatUptime(mockState.device.uptimeSeconds)}
+            <Text style={styles.diagnosticLabel}>DHT11 Status</Text>
+            <Text
+              style={[
+                styles.diagnosticValue,
+                {
+                  color:
+                    deviceData?.sensorStatus === 'OK'
+                      ? colors.emeraldGlow
+                      : colors.crimsonGlow,
+                },
+              ]}
+            >
+              {deviceData?.sensorStatus ?? 'UNKNOWN'}
             </Text>
           </View>
         </View>
 
         <View style={styles.deviceFooter}>
           <Text style={styles.firmwareText}>
-            Mode: {dataMode === 'device' ? 'HTTP Polling (2.0s)' : 'Mock Telemetry'} • DHT11:{' '}
-            {dataMode === 'device'
-              ? deviceData?.sensorStatus ?? 'UNKNOWN'
-              : mockState.device.sensorHealth.toUpperCase()}
+            Polling Rate: 2.0s • Endpoint: /api/status
           </Text>
           {onOpenDiagnostics && (
             <TouchableOpacity
@@ -518,33 +421,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           )}
         </View>
       </View>
-
-      {/* Simulation Selector or Device Mode Status Card */}
-      {dataMode === 'mock' ? (
-        <StateSimulationSelector
-          currentScenario={scenario}
-          onSelectScenario={setScenario}
-        />
-      ) : (
-        <View style={styles.deviceActiveBanner}>
-          <Text style={styles.deviceActiveIcon}>📡</Text>
-          <View style={styles.deviceActiveTextWrap}>
-            <Text style={styles.deviceActiveTitle}>Device Mode Active</Text>
-            <Text style={styles.deviceActiveSub}>
-              Dashboard is polling live HTTP telemetry from {deviceConfig.getBaseUrl()}/api/status every 2 seconds. Mock scenarios are disabled to protect genuine telemetry.
-            </Text>
-          </View>
-          {onOpenConfigModal && (
-            <TouchableOpacity
-              style={styles.switchMockButton}
-              onPress={onOpenConfigModal}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.switchMockButtonText}>Switch Mode</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
     </ScrollView>
   );
 };
@@ -559,7 +435,7 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 40,
   },
-  modeIndicatorCard: {
+  deviceConnectionCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -567,30 +443,28 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1.5,
     marginBottom: 12,
-  },
-  modeMockCard: {
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
-    borderColor: 'rgba(245, 158, 11, 0.3)',
-  },
-  modeDeviceCard: {
     backgroundColor: 'rgba(6, 182, 212, 0.08)',
     borderColor: 'rgba(6, 182, 212, 0.3)',
   },
-  modeTextGroup: {
+  deviceInfoGroup: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     flex: 1,
   },
-  modeIndicatorIcon: {
+  deviceIcon: {
     fontSize: 20,
   },
-  modeIndicatorTitle: {
+  deviceTextWrap: {
+    flex: 1,
+  },
+  deviceTitle: {
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.6,
+    color: colors.cyanGlow,
   },
-  modeIndicatorSub: {
+  deviceSub: {
     fontSize: 11,
     color: colors.textSecondary,
     marginTop: 1,
@@ -714,10 +588,10 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 14,
   },
-  deviceIcon: {
+  deviceCardIcon: {
     fontSize: 16,
   },
-  deviceTitle: {
+  deviceCardTitle: {
     fontSize: 12,
     fontWeight: '700',
     color: colors.textSecondary,
@@ -766,46 +640,5 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: colors.cyanGlow,
-  },
-  deviceActiveBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.cyanGlow,
-    gap: 12,
-    marginBottom: 20,
-  },
-  deviceActiveIcon: {
-    fontSize: 22,
-  },
-  deviceActiveTextWrap: {
-    flex: 1,
-  },
-  deviceActiveTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.cyanGlow,
-  },
-  deviceActiveSub: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 2,
-    lineHeight: 15,
-  },
-  switchMockButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  switchMockButtonText: {
-    fontSize: 11,
-    color: colors.textPrimary,
-    fontWeight: '600',
   },
 });

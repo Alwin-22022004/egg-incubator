@@ -9,48 +9,33 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { colors } from '../theme/colors';
-import { IncubatorState, ConnectionState } from '../types/incubator';
-import {
-  StateSimulationSelector,
-  SimulatedScenario,
-} from '../components/StateSimulationSelector';
-import {
-  mockNormalState,
-  mockWarningState,
-  mockLoadingState,
-  mockDisconnectedState,
-  mockErrorState,
-} from '../mock/mockData';
-import { DataMode, DeviceStatusResponse } from '../types/api';
+import { ConnectionState } from '../types/incubator';
+import { DeviceStatusResponse } from '../types/api';
 import { esp8266Api } from '../services/esp8266Api';
 import { deviceConfig } from '../services/deviceConfig';
 
 interface DeviceStatusScreenProps {
-  dataMode: DataMode;
   onBackToDashboard: () => void;
   onOpenSettings?: () => void;
   onOpenConfigModal?: () => void;
 }
 
 export const DeviceStatusScreen: React.FC<DeviceStatusScreenProps> = ({
-  dataMode,
   onBackToDashboard,
   onOpenSettings,
   onOpenConfigModal,
 }) => {
-  // Mock Mode state
-  const [scenario, setScenario] = useState<SimulatedScenario>('normal');
-  const [refreshing, setRefreshing] = useState(false);
-
-  // Device Mode state
   const [liveData, setLiveData] = useState<DeviceStatusResponse | null>(null);
   const [liveConnState, setLiveConnState] = useState<ConnectionState>('connecting');
   const [liveError, setLiveError] = useState<string | null>(null);
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [lastCheckTime, setLastCheckTime] = useState<string>('Never');
+  const [refreshing, setRefreshing] = useState(false);
+  const [isPinging, setIsPinging] = useState(false);
   const isMountedRef = useRef(true);
 
   const fetchLiveDiagnostics = async () => {
-    if (dataMode !== 'device' || !isMountedRef.current) return;
+    if (!isMountedRef.current) return;
 
     setLiveConnState('connecting');
     const result = await esp8266Api.getStatus();
@@ -64,6 +49,7 @@ export const DeviceStatusScreen: React.FC<DeviceStatusScreenProps> = ({
       setLiveData(result.data);
       setLiveConnState('connected');
       setLiveError(null);
+      setLatencyMs(result.latencyMs ?? null);
     } else {
       setLiveConnState('disconnected');
       setLiveError(result.error);
@@ -72,130 +58,57 @@ export const DeviceStatusScreen: React.FC<DeviceStatusScreenProps> = ({
 
   useEffect(() => {
     isMountedRef.current = true;
-    if (dataMode === 'device') {
-      fetchLiveDiagnostics();
-    }
+    fetchLiveDiagnostics();
     return () => {
       isMountedRef.current = false;
     };
-  }, [dataMode]);
-
-  const getStateForScenario = (s: SimulatedScenario): IncubatorState => {
-    switch (s) {
-      case 'overheat':
-        return mockWarningState;
-      case 'loading':
-        return mockLoadingState;
-      case 'disconnected':
-        return mockDisconnectedState;
-      case 'sensor_error':
-        return mockErrorState;
-      case 'normal':
-      default:
-        return mockNormalState;
-    }
-  };
-
-  const mockState = getStateForScenario(scenario);
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    if (dataMode === 'device') {
-      await fetchLiveDiagnostics();
-    } else {
-      await new Promise((resolve) => setTimeout(resolve, 600));
-    }
+    await fetchLiveDiagnostics();
     setRefreshing(false);
   };
 
-  const formatUptime = (seconds: number) => {
-    if (seconds <= 0) return '0h 0m';
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    return `${hrs}h ${mins}m`;
+  const handleManualPing = async () => {
+    setIsPinging(true);
+    await fetchLiveDiagnostics();
+    setIsPinging(false);
   };
 
-  // Overall health calculation
   const getOverallHealth = () => {
-    if (dataMode === 'device') {
-      if (liveConnState === 'connecting') {
-        return {
-          label: 'ESTABLISHING LINK',
-          color: colors.cyanGlow,
-          bg: colors.cyanMuted,
-          desc: `Attempting HTTP connection to ${deviceConfig.getBaseUrl()}/api/status...`,
-          icon: '🔄',
-        };
-      }
-      if (liveConnState === 'disconnected') {
-        return {
-          label: 'DEVICE UNREACHABLE (HTTP ERROR)',
-          color: colors.crimsonGlow,
-          bg: colors.crimsonMuted,
-          desc: liveError || 'No HTTP response received from ESP8266.',
-          icon: '⚠️',
-        };
-      }
-      if (liveData?.sensorStatus !== 'OK') {
-        return {
-          label: `SENSOR ALERT: ${liveData?.sensorStatus ?? 'FAULT'}`,
-          color: colors.amberGlow,
-          bg: colors.amberMuted,
-          desc: 'ESP8266 /api/status reports DHT11 sensor is not in OK status.',
-          icon: '⚡',
-        };
-      }
+    if (liveConnState === 'connecting') {
       return {
-        label: 'DEVICE CONNECTED (LIVE HTTP)',
-        color: colors.emeraldGlow,
-        bg: colors.emeraldMuted,
-        desc: `Verified live response from ${deviceConfig.getBaseUrl()}/api/status. Hardware decisions are autonomous on ESP8266.`,
-        icon: '✓',
-      };
-    }
-
-    // Mock Mode health logic
-    if (mockState.connection === 'disconnected') {
-      return {
-        label: 'OFFLINE / DISCONNECTED',
-        color: colors.textMuted,
-        bg: 'rgba(100, 116, 139, 0.15)',
-        desc: 'Showing simulated offline state.',
-        icon: '📡',
-      };
-    }
-    if (mockState.connection === 'connecting') {
-      return {
-        label: 'ESTABLISHING LINK',
+        label: 'CONNECTING...',
         color: colors.cyanGlow,
         bg: colors.cyanMuted,
-        desc: 'Simulated connection handshake.',
+        desc: `Polling ${deviceConfig.getBaseUrl()}/api/status...`,
         icon: '🔄',
       };
     }
-    if (mockState.connection === 'error' || mockState.device.sensorHealth === 'fault') {
+    if (liveConnState === 'disconnected') {
       return {
-        label: 'HARDWARE FAULT DETECTED',
+        label: 'DEVICE UNREACHABLE',
         color: colors.crimsonGlow,
         bg: colors.crimsonMuted,
-        desc: mockState.errorMessage || 'Simulated sensor fault.',
+        desc: liveError || 'No response from ESP8266.',
         icon: '⚠️',
       };
     }
-    if (mockState.health === 'warning') {
+    if (liveData?.sensorStatus !== 'OK') {
       return {
-        label: 'WARNING / DRIFT DETECTED',
+        label: `SENSOR ALERT (${liveData?.sensorStatus ?? 'FAULT'})`,
         color: colors.amberGlow,
         bg: colors.amberMuted,
-        desc: mockState.errorMessage || 'Simulated environmental drift.',
+        desc: 'DHT11 sensor reported fault. Relay heating is disabled for safety.',
         icon: '⚡',
       };
     }
     return {
-      label: 'SYSTEM NOMINAL (SIMULATED)',
+      label: 'SYSTEM HEALTHY',
       color: colors.emeraldGlow,
       bg: colors.emeraldMuted,
-      desc: 'Simulated telemetry and relay outputs are nominal.',
+      desc: `Live telemetry link established with ${deviceConfig.getBaseUrl()}`,
       icon: '✓',
     };
   };
@@ -216,7 +129,7 @@ export const DeviceStatusScreen: React.FC<DeviceStatusScreenProps> = ({
         />
       }
     >
-      {/* Navigation Bar */}
+      {/* Top Header Row */}
       <View style={styles.topNav}>
         <TouchableOpacity
           style={styles.backButton}
@@ -225,131 +138,85 @@ export const DeviceStatusScreen: React.FC<DeviceStatusScreenProps> = ({
         >
           <Text style={styles.backButtonText}>← Dashboard</Text>
         </TouchableOpacity>
-        <Text style={styles.navTitle}>Device Status & Diagnostics</Text>
+        <Text style={styles.navTitle}>ESP8266 Diagnostics</Text>
       </View>
 
-      {/* Mode Banner */}
-      <View
-        style={[
-          styles.mockBanner,
-          dataMode === 'device' ? styles.deviceBanner : styles.mockBannerStyle,
-        ]}
-      >
-        <Text style={styles.mockBannerIcon}>{dataMode === 'device' ? '📡' : 'ℹ️'}</Text>
-        <View style={styles.mockBannerTextContainer}>
-          <Text
-            style={[
-              styles.mockBannerTitle,
-              { color: dataMode === 'device' ? colors.cyanGlow : colors.amberGlow },
-            ]}
-          >
-            {dataMode === 'device'
-              ? `LIVE HTTP MODE • TARGET: ${deviceConfig.getBaseUrl()}`
-              : 'MOCK DIAGNOSTICS (STAGE 3/4)'}
-          </Text>
-          <Text style={styles.mockBannerSubtitle}>
-            {dataMode === 'device'
-              ? 'Telemetry reflects live response from /api/status. Fields not returned by the ESP8266 API are explicitly labeled "Not in /api/status" to avoid fabricated data.'
-              : 'All diagnostics below reflect simulated scenarios for user interface testing.'}
-          </Text>
-        </View>
-
-        {onOpenConfigModal && (
-          <TouchableOpacity
-            style={styles.editConfigButton}
-            onPress={onOpenConfigModal}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.editConfigButtonText}>Configure ✏️</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Overall Device Health Summary Card */}
-      <View style={[styles.healthCard, { borderColor: overall.color }]}>
-        <View style={styles.healthHeader}>
-          <Text style={styles.healthIcon}>{overall.icon}</Text>
-          <View style={styles.healthTitleContainer}>
-            <Text style={styles.healthSubtitle}>OVERALL DEVICE HEALTH</Text>
-            <Text style={[styles.healthTitle, { color: overall.color }]}>
+      {/* Primary Link Health Hero Banner */}
+      <View style={[styles.heroCard, { backgroundColor: overall.bg, borderColor: overall.color }]}>
+        <View style={styles.heroHeader}>
+          <Text style={styles.heroIcon}>{overall.icon}</Text>
+          <View style={styles.heroTitleWrap}>
+            <Text style={[styles.heroTitle, { color: overall.color }]}>
               {overall.label}
             </Text>
+            <Text style={styles.heroSub}>{overall.desc}</Text>
           </View>
         </View>
-        <Text style={styles.healthDescription}>{overall.desc}</Text>
+
+        <View style={styles.heroMetaRow}>
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>TARGET IP</Text>
+            <Text style={styles.metaValue}>{deviceConfig.getBaseUrl()}</Text>
+          </View>
+          <View style={styles.metaDivider} />
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>PING LATENCY</Text>
+            <Text style={styles.metaValue}>
+              {latencyMs !== null ? `${latencyMs} ms` : '—'}
+            </Text>
+          </View>
+          <View style={styles.metaDivider} />
+          <View style={styles.metaItem}>
+            <Text style={styles.metaLabel}>LAST PROBE</Text>
+            <Text style={styles.metaValue}>{lastCheckTime}</Text>
+          </View>
+        </View>
       </View>
 
-      {/* SECTION A: Device Connection */}
+      {/* Network & Device Info Card */}
       <View style={styles.sectionCard}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionIcon}>📡</Text>
-          <Text style={styles.sectionTitle}>DEVICE CONNECTION</Text>
+          <Text style={styles.sectionTitle}>NETWORK & FIRMWARE</Text>
         </View>
 
         <View style={styles.grid}>
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Device Name</Text>
-            <Text style={styles.itemValue}>Egg Incubator ESP8266</Text>
-            <Text style={styles.itemSub}>ESP8266 NodeMCU-12E</Text>
+            <Text style={styles.itemLabel}>Hardware Model</Text>
+            <Text style={styles.itemValue}>ESP8266 NodeMCU</Text>
+            <Text style={styles.itemSub}>ESP-12E Wi-Fi SoC</Text>
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Connection Status</Text>
+            <Text style={styles.itemLabel}>HTTP API State</Text>
             <View style={[styles.chip, { backgroundColor: overall.bg }]}>
-              <View style={[styles.chipDot, { backgroundColor: overall.color }]} />
               <Text style={[styles.chipText, { color: overall.color }]}>
-                {dataMode === 'device'
-                  ? liveConnState.toUpperCase()
-                  : mockState.connection.toUpperCase()}
+                {liveConnState.toUpperCase()}
               </Text>
             </View>
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Device IP / URL</Text>
+            <Text style={styles.itemLabel}>Device Base URL</Text>
             <Text style={[styles.itemValue, styles.mono]}>
-              {dataMode === 'device' ? deviceConfig.getBaseUrl() : mockState.device.ipAddress}
+              {deviceConfig.getBaseUrl()}
             </Text>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device' ? 'Configured Target' : 'Simulated IP'}
-            </Text>
+            <Text style={styles.itemSub}>Port 80 HTTP Server</Text>
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Wi-Fi Signal (RSSI)</Text>
-            <Text
-              style={[
-                styles.itemValue,
-                dataMode === 'device' ? { color: colors.textMuted } : null,
-              ]}
-            >
-              {dataMode === 'device'
-                ? 'Not in /api/status'
-                : `${mockState.device.rssi} dBm`}
-            </Text>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device'
-                ? 'Unsupported by current endpoint'
-                : 'Simulated Wi-Fi signal'}
-            </Text>
+            <Text style={styles.itemLabel}>Local Subnet</Text>
+            <Text style={styles.itemValue}>2.4 GHz Wi-Fi</Text>
+            <Text style={styles.itemSub}>Same router required</Text>
           </View>
-        </View>
-
-        <View style={styles.cardFooter}>
-          <Text style={styles.footerNote}>
-            Last successful probe:{' '}
-            <Text style={styles.footerHighlight}>
-              {dataMode === 'device' ? lastCheckTime : mockState.device.lastSyncTimestamp}
-            </Text>
-          </Text>
         </View>
       </View>
 
-      {/* SECTION B: Sensor Diagnostics (DHT11) */}
+      {/* Sensor Diagnostics (DHT11) */}
       <View style={styles.sectionCard}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionIcon}>🌡️</Text>
-          <Text style={styles.sectionTitle}>SENSOR DIAGNOSTICS</Text>
+          <Text style={styles.sectionTitle}>DHT11 SENSOR DIAGNOSTICS</Text>
         </View>
 
         <View style={styles.grid}>
@@ -360,17 +227,13 @@ export const DeviceStatusScreen: React.FC<DeviceStatusScreenProps> = ({
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Sensor Health</Text>
+            <Text style={styles.itemLabel}>Sensor Status</Text>
             <View
               style={[
                 styles.chip,
                 {
                   backgroundColor:
-                    dataMode === 'device'
-                      ? liveData?.sensorStatus === 'OK'
-                        ? colors.emeraldMuted
-                        : colors.crimsonMuted
-                      : mockState.device.sensorHealth === 'healthy'
+                    liveData?.sensorStatus === 'OK'
                       ? colors.emeraldMuted
                       : colors.crimsonMuted,
                 },
@@ -381,275 +244,126 @@ export const DeviceStatusScreen: React.FC<DeviceStatusScreenProps> = ({
                   styles.chipText,
                   {
                     color:
-                      dataMode === 'device'
-                        ? liveData?.sensorStatus === 'OK'
-                          ? colors.emeraldGlow
-                          : colors.crimsonGlow
-                        : mockState.device.sensorHealth === 'healthy'
+                      liveData?.sensorStatus === 'OK'
                         ? colors.emeraldGlow
                         : colors.crimsonGlow,
                   },
                 ]}
               >
-                {dataMode === 'device'
-                  ? liveData?.sensorStatus ?? 'UNKNOWN'
-                  : mockState.device.sensorHealth.toUpperCase()}
+                {liveData?.sensorStatus ?? 'UNKNOWN'}
               </Text>
             </View>
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Temperature Status</Text>
+            <Text style={styles.itemLabel}>Temperature Reading</Text>
             <Text style={[styles.itemValue, { color: colors.amberGlow }]}>
-              {dataMode === 'device'
-                ? liveData
-                  ? liveData.temperature !== null
-                    ? `Valid (${liveData.temperature}°C)`
-                    : 'Fault / Null'
-                  : 'Awaiting Reading'
-                : mockState.device.tempReadingStatus}
+              {liveData?.temperature !== null && liveData?.temperature !== undefined
+                ? `${liveData.temperature}°C`
+                : 'Fault / Null'}
             </Text>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device' ? 'HTTP /api/status' : 'Simulated Value'}
-            </Text>
+            <Text style={styles.itemSub}>Parsed from /api/status</Text>
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Humidity Status</Text>
+            <Text style={styles.itemLabel}>Humidity Reading</Text>
             <Text style={[styles.itemValue, { color: colors.cyanGlow }]}>
-              {dataMode === 'device'
-                ? liveData
-                  ? liveData.humidity !== null
-                    ? `Valid (${liveData.humidity}%)`
-                    : 'Fault / Null'
-                  : 'Awaiting Reading'
-                : mockState.device.humidityReadingStatus}
+              {liveData?.humidity !== null && liveData?.humidity !== undefined
+                ? `${liveData.humidity}%`
+                : 'Fault / Null'}
             </Text>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device' ? 'HTTP /api/status' : 'Simulated Value'}
-            </Text>
+            <Text style={styles.itemSub}>Parsed from /api/status</Text>
           </View>
-        </View>
-
-        <View style={styles.cardFooter}>
-          <Text style={styles.footerNote}>
-            Payload validation:{' '}
-            <Text style={styles.footerHighlight}>
-              {dataMode === 'device'
-                ? liveData
-                  ? 'Valid JSON Schema ✓'
-                  : 'No Valid Response'
-                : 'Simulated Packet'}
-            </Text>
-          </Text>
         </View>
       </View>
 
-      {/* SECTION C: Actuator Status (Read-Only) */}
+      {/* Actuator & Output Diagnostics */}
       <View style={styles.sectionCard}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionIcon}>⚡</Text>
-          <Text style={styles.sectionTitle}>ACTUATOR STATUS (READ-ONLY)</Text>
-        </View>
-        <Text style={styles.readOnlyNotice}>
-          Diagnostics view only. In Device Mode, relay decisions are executed exclusively by the ESP8266 firmware.
-        </Text>
-
-        <View style={styles.grid}>
-          <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Bulb Relay (Relay 1)</Text>
-            <View
-              style={[
-                styles.statusPill,
-                {
-                  backgroundColor: (dataMode === 'device' ? liveData?.bulbOn : mockState.actuators.bulbRelay)
-                    ? colors.amberMuted
-                    : 'rgba(100, 116, 139, 0.1)',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statusPillText,
-                  {
-                    color: (dataMode === 'device' ? liveData?.bulbOn : mockState.actuators.bulbRelay)
-                      ? colors.amberGlow
-                      : colors.textMuted,
-                  },
-                ]}
-              >
-                {(dataMode === 'device' ? liveData?.bulbOn : mockState.actuators.bulbRelay)
-                  ? '🔥 ON (HEATING)'
-                  : 'STANDBY (OFF)'}
-              </Text>
-            </View>
-            <Text style={styles.itemSub}>GPIO Pin D7 (Active LOW)</Text>
-          </View>
-
-          <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Fan Relay</Text>
-            <View
-              style={[
-                styles.statusPill,
-                {
-                  backgroundColor: 'rgba(100, 116, 139, 0.1)',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statusPillText,
-                  {
-                    color: colors.textMuted,
-                  },
-                ]}
-              >
-                {dataMode === 'device' ? 'NOT INSTALLED' : (mockState.actuators.fanRelay ? '🌀 ON' : 'IDLE')}
-              </Text>
-            </View>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device' ? 'No fan wired on ESP8266' : 'Simulated state'}
-            </Text>
-          </View>
-
-          <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Safety Buzzer</Text>
-            <View
-              style={[
-                styles.statusPill,
-                {
-                  backgroundColor: (dataMode === 'device' ? liveData?.buzzerOn : mockState.actuators.buzzerActive)
-                    ? colors.crimsonMuted
-                    : 'rgba(100, 116, 139, 0.1)',
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statusPillText,
-                  {
-                    color: (dataMode === 'device' ? liveData?.buzzerOn : mockState.actuators.buzzerActive)
-                      ? colors.crimsonGlow
-                      : colors.textMuted,
-                  },
-                ]}
-              >
-                {(dataMode === 'device' ? liveData?.buzzerOn : mockState.actuators.buzzerActive)
-                  ? '🔔 ACTIVE ALERT'
-                  : 'MUTED (OFF)'}
-              </Text>
-            </View>
-            <Text style={styles.itemSub}>GPIO Pin D6 (Active HIGH)</Text>
-          </View>
-
-          <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>OLED Display (0.96")</Text>
-            <View
-              style={[
-                styles.statusPill,
-                {
-                  backgroundColor:
-                    dataMode === 'device'
-                      ? 'rgba(100, 116, 139, 0.1)'
-                      : colors.emeraldMuted,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statusPillText,
-                  {
-                    color: dataMode === 'device' ? colors.textMuted : colors.emeraldGlow,
-                  },
-                ]}
-              >
-                {dataMode === 'device' ? 'Not in /api/status' : '📟 AVAILABLE'}
-              </Text>
-            </View>
-            <Text style={styles.itemSub}>I2C Bus (D2/SDA, D1/SCL)</Text>
-          </View>
-        </View>
-      </View>
-
-      {/* SECTION D: Runtime Diagnostics */}
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionIcon}>⏱️</Text>
-          <Text style={styles.sectionTitle}>RUNTIME DIAGNOSTICS</Text>
+          <Text style={styles.sectionTitle}>ACTUATORS & RELAYS</Text>
         </View>
 
         <View style={styles.grid}>
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>System Uptime</Text>
-            <Text style={styles.itemValue}>
-              {dataMode === 'device'
-                ? 'Not in /api/status'
-                : formatUptime(mockState.device.uptimeSeconds)}
+            <Text style={styles.itemLabel}>Bulb Relay (D7)</Text>
+            <Text
+              style={[
+                styles.itemValue,
+                { color: liveData?.bulbOn ? colors.amberGlow : colors.textMuted },
+              ]}
+            >
+              {liveData?.bulbOn ? 'ENERGIZED (HEATING)' : 'OFF (STANDBY)'}
             </Text>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device' ? 'Firmware pending' : 'Simulated counter'}
-            </Text>
+            <Text style={styles.itemSub}>Active-LOW Relay Pin D7</Text>
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Sensor Sampling Rate</Text>
-            <Text style={[styles.itemValue, styles.mono]}>
-              {dataMode === 'device' ? '2,000 ms' : `${mockState.device.samplingIntervalMs} ms`}
+            <Text style={styles.itemLabel}>Buzzer (D6)</Text>
+            <Text
+              style={[
+                styles.itemValue,
+                { color: liveData?.buzzerOn ? colors.crimsonGlow : colors.textMuted },
+              ]}
+            >
+              {liveData?.buzzerOn ? 'ALERTING' : 'MUTED'}
             </Text>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device' ? 'Client polling rate' : 'Simulated rate'}
-            </Text>
+            <Text style={styles.itemSub}>Active-HIGH Pin D6</Text>
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Bulb Activations</Text>
-            <Text style={styles.itemValue}>
-              {dataMode === 'device'
-                ? 'Not in /api/status'
-                : `${mockState.device.totalBulbActivations} cycles`}
+            <Text style={styles.itemLabel}>Circulation Fan</Text>
+            <Text style={[styles.itemValue, { color: colors.textMuted }]}>
+              {liveData?.fanOn === null ? 'Not Installed' : liveData?.fanOn ? 'ON' : 'OFF'}
             </Text>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device' ? 'Firmware pending' : 'Simulated cycles'}
-            </Text>
+            <Text style={styles.itemSub}>API reports null</Text>
           </View>
 
           <View style={styles.gridItem}>
-            <Text style={styles.itemLabel}>Fan Activations</Text>
-            <Text style={styles.itemValue}>
-              {dataMode === 'device'
-                ? 'Not in /api/status'
-                : `${mockState.device.totalFanActivations} cycles`}
+            <Text style={styles.itemLabel}>OLED Display</Text>
+            <Text style={[styles.itemValue, { color: colors.emeraldGlow }]}>
+              {liveConnState === 'connected' ? 'SSD1306 (0x3C)' : 'Offline'}
             </Text>
-            <Text style={styles.itemSub}>
-              {dataMode === 'device' ? 'Firmware pending' : 'Simulated cycles'}
-            </Text>
+            <Text style={styles.itemSub}>I2C Pins D1/D2</Text>
           </View>
         </View>
       </View>
 
-      {/* Simulation Selector in Mock Mode or Device Mode Explanation */}
-      {dataMode === 'mock' ? (
-        <StateSimulationSelector
-          currentScenario={scenario}
-          onSelectScenario={setScenario}
-        />
-      ) : (
-        <View style={styles.deviceModeNotice}>
-          <Text style={styles.deviceModeNoticeTitle}>📡 Live Device Mode Active</Text>
-          <Text style={styles.deviceModeNoticeBody}>
-            Diagnostics reflect live responses from {deviceConfig.getBaseUrl()}/api/status. Simulation scenario toggles are disabled in Device Mode. Switch to Mock Mode to preview simulated fault states.
-          </Text>
-          {onOpenConfigModal && (
-            <TouchableOpacity
-              style={styles.switchModeButton}
-              onPress={onOpenConfigModal}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.switchModeButtonText}>Switch to Mock Mode 🧪</Text>
-            </TouchableOpacity>
+      {/* Action Buttons */}
+      <View style={styles.actionsContainer}>
+        <TouchableOpacity
+          style={styles.probeButton}
+          onPress={handleManualPing}
+          disabled={isPinging}
+          activeOpacity={0.7}
+        >
+          {isPinging ? (
+            <ActivityIndicator size="small" color={colors.cyanGlow} />
+          ) : (
+            <Text style={styles.probeButtonText}>Probe Connection Now ⚡</Text>
           )}
-        </View>
-      )}
+        </TouchableOpacity>
+
+        {onOpenConfigModal && (
+          <TouchableOpacity
+            style={styles.ipButton}
+            onPress={onOpenConfigModal}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.ipButtonText}>Change ESP8266 IP ✏️</Text>
+          </TouchableOpacity>
+        )}
+
+        {onOpenSettings && (
+          <TouchableOpacity
+            style={styles.settingsButton}
+            onPress={onOpenSettings}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.settingsButtonText}>Configure Thresholds ⚙️</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </ScrollView>
   );
 };
@@ -667,7 +381,7 @@ const styles = StyleSheet.create({
   topNav: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 16,
   },
   backButton: {
     paddingVertical: 8,
@@ -688,92 +402,69 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
   },
-  mockBanner: {
+  heroCard: {
+    borderRadius: 16,
+    borderWidth: 1.5,
+    padding: 16,
+    marginBottom: 16,
+  },
+  heroHeader: {
     flexDirection: 'row',
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 14,
-    gap: 10,
+    gap: 12,
     alignItems: 'center',
+    marginBottom: 14,
   },
-  mockBannerStyle: {
-    backgroundColor: 'rgba(245, 158, 11, 0.08)',
-    borderColor: 'rgba(245, 158, 11, 0.25)',
+  heroIcon: {
+    fontSize: 28,
   },
-  deviceBanner: {
-    backgroundColor: 'rgba(6, 182, 212, 0.08)',
-    borderColor: 'rgba(6, 182, 212, 0.25)',
-  },
-  mockBannerIcon: {
-    fontSize: 18,
-  },
-  mockBannerTextContainer: {
+  heroTitleWrap: {
     flex: 1,
   },
-  mockBannerTitle: {
-    fontSize: 11,
+  heroTitle: {
+    fontSize: 15,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
-  mockBannerSubtitle: {
-    fontSize: 11,
-    color: colors.textSecondary,
-    marginTop: 2,
-    lineHeight: 15,
-  },
-  editConfigButton: {
-    backgroundColor: colors.surfaceElevated,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  editConfigButtonText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.textPrimary,
-  },
-  healthCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1.5,
-    marginBottom: 16,
-  },
-  healthHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
-  },
-  healthIcon: {
-    fontSize: 24,
-  },
-  healthTitleContainer: {
-    flex: 1,
-  },
-  healthSubtitle: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textMuted,
-    letterSpacing: 0.8,
-  },
-  healthTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-    marginTop: 2,
-  },
-  healthDescription: {
+  heroSub: {
     fontSize: 12,
     color: colors.textSecondary,
-    lineHeight: 17,
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(0, 0, 0, 0.25)',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  metaItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  metaLabel: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  metaValue: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    fontFamily: 'monospace',
+  },
+  metaDivider: {
+    width: 1,
+    height: 22,
+    backgroundColor: colors.border,
   },
   sectionCard: {
     backgroundColor: colors.surface,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 16,
     borderWidth: 1,
     borderColor: colors.border,
@@ -783,7 +474,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
+    marginBottom: 14,
   },
   sectionIcon: {
     fontSize: 16,
@@ -794,123 +485,88 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     letterSpacing: 0.8,
   },
-  readOnlyNotice: {
-    fontSize: 11,
-    color: colors.textMuted,
-    marginBottom: 12,
-    lineHeight: 15,
-  },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
   },
   gridItem: {
-    width: '47.5%',
-    backgroundColor: colors.surfaceSubtle,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: colors.border,
+    width: '47%',
   },
   itemLabel: {
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 11,
     color: colors.textMuted,
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   itemValue: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
     color: colors.textPrimary,
   },
   itemSub: {
-    fontSize: 11,
+    fontSize: 10,
     color: colors.textMuted,
-    marginTop: 3,
+    marginTop: 1,
   },
   mono: {
     fontFamily: 'monospace',
   },
   chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
-    gap: 5,
+    alignSelf: 'flex-start',
     marginTop: 2,
-  },
-  chipDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
   },
   chipText: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
-  statusPill: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginTop: 2,
+  actionsContainer: {
+    gap: 10,
+    marginBottom: 10,
   },
-  statusPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  cardFooter: {
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  footerNote: {
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  footerHighlight: {
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-  deviceModeNotice: {
+  probeButton: {
     backgroundColor: colors.surfaceSubtle,
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: 20,
+    height: 46,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.cyanGlow,
   },
-  deviceModeNoticeTitle: {
+  probeButtonText: {
     fontSize: 13,
     fontWeight: '700',
     color: colors.cyanGlow,
-    marginBottom: 4,
   },
-  deviceModeNoticeBody: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    lineHeight: 16,
-    marginBottom: 10,
-  },
-  switchModeButton: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
+  ipButton: {
     backgroundColor: colors.surfaceElevated,
+    height: 46,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: colors.amberGlow,
+    borderColor: colors.border,
   },
-  switchModeButtonText: {
-    fontSize: 12,
+  ipButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  settingsButton: {
+    backgroundColor: colors.surfaceElevated,
+    height: 46,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  settingsButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
     color: colors.amberGlow,
-    fontWeight: '700',
   },
 });

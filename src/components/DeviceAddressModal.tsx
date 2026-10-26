@@ -13,7 +13,6 @@ import {
 import { colors } from '../theme/colors';
 import { deviceConfig, DEFAULT_DEVICE_URL } from '../services/deviceConfig';
 import { esp8266Api } from '../services/esp8266Api';
-import { DataMode } from '../types/api';
 
 interface DeviceAddressModalProps {
   visible: boolean;
@@ -25,7 +24,6 @@ export const DeviceAddressModal: React.FC<DeviceAddressModalProps> = ({
   onClose,
 }) => {
   const [urlInput, setUrlInput] = useState<string>(deviceConfig.getBaseUrl());
-  const [selectedMode, setSelectedMode] = useState<DataMode>(deviceConfig.getDataMode());
   const [inputError, setInputError] = useState<string | null>(null);
   const [testStatus, setTestStatus] = useState<{
     testing: boolean;
@@ -36,7 +34,6 @@ export const DeviceAddressModal: React.FC<DeviceAddressModalProps> = ({
   useEffect(() => {
     if (visible) {
       setUrlInput(deviceConfig.getBaseUrl());
-      setSelectedMode(deviceConfig.getDataMode());
       setInputError(null);
       setTestStatus({ testing: false });
     }
@@ -83,7 +80,6 @@ export const DeviceAddressModal: React.FC<DeviceAddressModalProps> = ({
     }
 
     deviceConfig.setBaseUrl(validation.normalized);
-    deviceConfig.setDataMode(selectedMode);
     onClose();
   };
 
@@ -103,68 +99,18 @@ export const DeviceAddressModal: React.FC<DeviceAddressModalProps> = ({
           <View style={styles.headerRow}>
             <View style={styles.titleGroup}>
               <Text style={styles.icon}>📡</Text>
-              <Text style={styles.title}>ESP8266 Connection Config</Text>
+              <Text style={styles.title}>ESP8266 Device Address</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeButton}>
               <Text style={styles.closeButtonText}>✕</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Operational Data Mode Selector */}
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>ACTIVE DATA MODE</Text>
-            <View style={styles.modeToggleRow}>
-              <TouchableOpacity
-                style={[
-                  styles.modeButton,
-                  selectedMode === 'mock' && styles.modeButtonActiveMock,
-                ]}
-                onPress={() => setSelectedMode('mock')}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.modeIcon}>🧪</Text>
-                <View>
-                  <Text
-                    style={[
-                      styles.modeText,
-                      selectedMode === 'mock' && styles.modeTextActive,
-                    ]}
-                  >
-                    Mock Mode
-                  </Text>
-                  <Text style={styles.modeSub}>Simulated Scenarios</Text>
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.modeButton,
-                  selectedMode === 'device' && styles.modeButtonActiveDevice,
-                ]}
-                onPress={() => setSelectedMode('device')}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.modeIcon}>📡</Text>
-                <View>
-                  <Text
-                    style={[
-                      styles.modeText,
-                      selectedMode === 'device' && styles.modeTextActive,
-                    ]}
-                  >
-                    Device Mode
-                  </Text>
-                  <Text style={styles.modeSub}>Live HTTP Polling</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-
           {/* Device Base URL Input */}
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>ESP8266 BASE URL</Text>
             <Text style={styles.hintText}>
-              Enter the local IP address or mDNS hostname of your NodeMCU:
+              Enter the local IP address assigned to your ESP8266 NodeMCU on your Wi-Fi:
             </Text>
 
             <View style={[styles.inputWrapper, inputError ? styles.inputWrapperError : null]}>
@@ -198,7 +144,7 @@ export const DeviceAddressModal: React.FC<DeviceAddressModalProps> = ({
           <View style={styles.infoBanner}>
             <Text style={styles.infoIcon}>ℹ️</Text>
             <Text style={styles.infoText}>
-              <Text style={styles.infoHighlight}>Local Network Requirement:</Text> Your Android phone and ESP8266 must be on the same local Wi-Fi router (e.g. 2.4 GHz network).
+              <Text style={styles.infoHighlight}>Local Wi-Fi Network:</Text> Your phone and the ESP8266 must be connected to the same Wi-Fi router (2.4 GHz). Check the ESP8266 OLED display or Serial Monitor for its IP address.
             </Text>
           </View>
 
@@ -253,7 +199,7 @@ export const DeviceAddressModal: React.FC<DeviceAddressModalProps> = ({
                 onPress={handleSave}
                 activeOpacity={0.8}
               >
-                <Text style={styles.saveButtonText}>Apply Config</Text>
+                <Text style={styles.saveButtonText}>Apply IP</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -322,44 +268,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
     marginBottom: 8,
-  },
-  modeToggleRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  modeButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 12,
-    backgroundColor: colors.surfaceSubtle,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    gap: 8,
-  },
-  modeButtonActiveMock: {
-    borderColor: colors.amberGlow,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-  },
-  modeButtonActiveDevice: {
-    borderColor: colors.cyanGlow,
-    backgroundColor: 'rgba(6, 182, 212, 0.12)',
-  },
-  modeIcon: {
-    fontSize: 20,
-  },
-  modeText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.textSecondary,
-  },
-  modeTextActive: {
-    color: colors.textPrimary,
-  },
-  modeSub: {
-    fontSize: 10,
-    color: colors.textMuted,
   },
   inputWrapper: {
     flexDirection: 'row',

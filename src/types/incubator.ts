@@ -46,15 +46,27 @@ export interface DeviceDiagnostics {
   totalFanActivations: number;
   samplingIntervalMs: number;// e.g. 2000 ms
   oledDisplayState: 'available' | 'unknown';
-  isMock: boolean;
 }
 
 export interface TemperatureSettings {
   bulbOnThreshold: number;   // Bulb turns ON at or below this value (default 36.0 °C)
   bulbOffThreshold: number;  // Bulb turns OFF at or above this value (default 38.0 °C)
   lastUpdated?: string;
-  isMock: boolean;
 }
+
+export const DEFAULT_TEMPERATURE_SETTINGS: TemperatureSettings = {
+  bulbOnThreshold: 36.0,
+  bulbOffThreshold: 38.0,
+  lastUpdated: 'Default (36.0°C / 38.0°C)',
+};
+
+export const DEFAULT_INCUBATION_PROGRESS: IncubatorProgress = {
+  cycleName: 'Chicken Eggs Hatching',
+  currentDay: 1,
+  totalDays: 21,
+  lockdownDay: 18,
+  eggTurningActive: true,
+};
 
 export interface IncubatorState {
   connection: ConnectionState;

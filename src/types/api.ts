@@ -2,8 +2,6 @@
  * Types and validation schemas for ESP8266 HTTP API communication.
  */
 
-export type DataMode = 'mock' | 'device';
-
 /**
  * Expected schema for GET /api/status.
  * Notes:

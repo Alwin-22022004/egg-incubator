@@ -1,16 +1,13 @@
-import { DataMode } from '../types/api';
-
 /**
- * Service for managing ESP8266 device address configuration and operational data mode.
+ * Service for managing ESP8266 device address configuration.
  * Centralizes address validation and event emission so UI components react immediately
- * to user configuration changes without requiring code edits.
+ * to user configuration changes.
  */
 
 export const DEFAULT_DEVICE_URL = 'http://192.168.1.142';
 
 export interface DeviceConfigState {
   baseUrl: string;
-  dataMode: DataMode;
   lastChanged: string;
 }
 
@@ -18,7 +15,6 @@ type ConfigChangeListener = (state: DeviceConfigState) => void;
 
 class DeviceConfigService {
   private baseUrl: string = DEFAULT_DEVICE_URL;
-  private dataMode: DataMode = 'mock';
   private listeners: Set<ConfigChangeListener> = new Set();
 
   /**
@@ -29,19 +25,11 @@ class DeviceConfigService {
   }
 
   /**
-   * Retrieves the active data mode ('mock' | 'device').
-   */
-  public getDataMode(): DataMode {
-    return this.dataMode;
-  }
-
-  /**
    * Returns current snapshot of configuration state.
    */
   public getState(): DeviceConfigState {
     return {
       baseUrl: this.baseUrl,
-      dataMode: this.dataMode,
       lastChanged: new Date().toLocaleTimeString(),
     };
   }
@@ -104,16 +92,6 @@ class DeviceConfigService {
     this.baseUrl = validation.normalized;
     this.notify();
     return { success: true };
-  }
-
-  /**
-   * Switches operational data mode between 'mock' and 'device'.
-   */
-  public setDataMode(mode: DataMode): void {
-    if (this.dataMode !== mode) {
-      this.dataMode = mode;
-      this.notify();
-    }
   }
 
   /**

@@ -14,7 +14,7 @@ A complete IoT-based smart egg incubator monitoring and automated climate contro
   - Real-time telemetry monitoring (Temperature, Humidity, Days left, Next turn countdown).
   - Target temperature & humidity threshold configuration synchronized over `/api/config`.
   - Diagnostics screen with connection health, ping response latency, and memory stats.
-  - Dual operational modes: **Live Device Mode** (direct HTTP to ESP8266) & **Simulation Mode** (test UI without hardware).
+  - Direct Live Communication with ESP8266 REST API (`/api/status` & `/api/config`).
 
 ---
 
@@ -25,8 +25,7 @@ A complete IoT-based smart egg incubator monitoring and automated climate contro
 │   └── EggIncubator/
 │       └── EggIncubator.ino    # ESP8266 NodeMCU Arduino firmware
 ├── src/
-│   ├── components/            # Reusable UI cards, headers, modals
-│   ├── mock/                  # Simulated telemetry & state generator
+│   ├── components/            # Reusable UI cards, headers, IP setup modal
 │   ├── screens/               # Dashboard, Settings, & Diagnostics screens
 │   ├── services/              # ESP8266 HTTP client & configuration storage
 │   ├── theme/                 # Dark-mode color palette and design tokens

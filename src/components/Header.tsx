@@ -3,15 +3,12 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { colors } from '../theme/colors';
 import { ConnectionState } from '../types/incubator';
 
-import { DataMode } from '../types/api';
-
 export type AppScreen = 'dashboard' | 'temperatureSettings' | 'deviceStatus';
 
 interface HeaderProps {
   connection: ConnectionState;
   chipModel: string;
   lastSync: string;
-  dataMode?: DataMode;
   currentScreen?: AppScreen;
   onNavigate?: (screen: AppScreen) => void;
   onOpenSettings?: () => void;
@@ -24,7 +21,6 @@ export const Header: React.FC<HeaderProps> = ({
   connection,
   chipModel,
   lastSync,
-  dataMode = 'mock',
   currentScreen = 'dashboard',
   onNavigate,
   onOpenSettings,
@@ -73,22 +69,12 @@ export const Header: React.FC<HeaderProps> = ({
         <View style={styles.badgeGroup}>
           {onOpenConfigModal && (
             <TouchableOpacity
-              style={[
-                styles.modeBadge,
-                dataMode === 'device' ? styles.modeBadgeDevice : styles.modeBadgeMock,
-              ]}
+              style={styles.ipConfigBadge}
               onPress={onOpenConfigModal}
               activeOpacity={0.7}
             >
-              <Text style={styles.modeBadgeIcon}>{dataMode === 'device' ? '📡' : '🧪'}</Text>
-              <Text
-                style={[
-                  styles.modeBadgeText,
-                  { color: dataMode === 'device' ? colors.cyanGlow : colors.amberGlow },
-                ]}
-              >
-                {dataMode === 'device' ? 'DEVICE' : 'MOCK'}
-              </Text>
+              <Text style={styles.ipBadgeIcon}>📡</Text>
+              <Text style={styles.ipBadgeText}>IP CONFIG</Text>
             </TouchableOpacity>
           )}
 
@@ -193,30 +179,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
   },
-  modeBadge: {
+  ipConfigBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
     borderWidth: 1,
+    borderColor: 'rgba(6, 182, 212, 0.35)',
+    backgroundColor: 'rgba(6, 182, 212, 0.12)',
     gap: 4,
   },
-  modeBadgeMock: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderColor: 'rgba(245, 158, 11, 0.35)',
-  },
-  modeBadgeDevice: {
-    backgroundColor: 'rgba(6, 182, 212, 0.12)',
-    borderColor: 'rgba(6, 182, 212, 0.35)',
-  },
-  modeBadgeIcon: {
+  ipBadgeIcon: {
     fontSize: 11,
   },
-  modeBadgeText: {
+  ipBadgeText: {
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.6,
+    color: colors.cyanGlow,
   },
   badge: {
     flexDirection: 'row',
